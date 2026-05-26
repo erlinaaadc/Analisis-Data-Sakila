@@ -1,0 +1,410 @@
+---
+title: "Analisis Data Sakila"
+author: "Erlina Dwi Cahyani (M0723031)"
+date: "2026-05-26"
+output:
+  html_document:
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+<style>
+.title {
+  text-align: center;
+  color: #0B3C5D;
+  font-weight: bold;
+}
+
+h1 {
+  color: #0B3C5D;
+  text-align: left;
+}
+
+h1 .header-section-number::after {
+  content: ") ";
+}
+
+
+h2 {
+  color: #328CC1;
+  border-bottom: 2px solid #328CC1;
+  padding-bottom: 5px;
+}
+
+body {
+  font-family: "Segoe UI";
+  line-height: 1.8;
+}
+
+table {
+  margin: auto;
+}
+
+.caption {
+  text-align: center;
+  font-style: italic;
+}
+
+code {
+  background-color: #f4f4f4;
+  color: #c7254e;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+# Deskripsi Data Sakila {.unnumbered}
+
+Database Sakila merupakan database bisnis rental film yang dapat digunakan untuk menganalisis berbagai aktivitas bisnis seperti transaksi rental, pelanggan, film, dan aktor. Data ini dapat dieksplor dan dianalisis untuk memperoleh insight bisnis yang nantinya dapat membantu pengambilan keputusan oleh perusahaan.
+
+# Koneksi Database & Load Packages
+
+```{r}
+library(DBI)
+library(RMySQL)
+library(tidyverse)
+library(ggplot2)
+library(DT)
+```
+
+
+```{r, include=FALSE}
+con <- dbConnect(
+  RMySQL::MySQL(),
+  dbname = "sakila",
+  host = "localhost",
+  port = 3306,
+  user = "root",
+  password = "linabelajar2004basdat2023////"
+)
+```
+
+
+# Insight 1: Genre Film Paling Menguntungkan
+Insight ini diambil untuk mengetahui genre film yang menghasilkan pendapatan terbesar untuk menjadi bahan pengambilan keputusan bisnis. Analisis ini dilakukan untuk mengetahui genre mana yang paling diminati pelanggan berdasarkan total pendapatan rental yang diperoleh.
+
+## Pengambilan Data
+```{r}
+genre_income <- dbGetQuery(con, "
+SELECT c.name AS genre,
+SUM(p.amount) AS total_income
+FROM payment p
+JOIN rental r ON p.rental_id = r.rental_id
+JOIN inventory i ON r.inventory_id = i.inventory_id
+JOIN film f ON i.film_id = f.film_id
+JOIN film_category fc ON f.film_id = fc.film_id
+JOIN category c ON fc.category_id = c.category_id
+GROUP BY c.name
+ORDER BY total_income DESC
+")
+```
+
+## Visualisasi
+```{r}
+ggplot(genre_income, aes(x=reorder(genre, total_income),
+  y=total_income,
+  fill=genre)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Pendapatan Berdasarkan Genre Film",
+    x = "Genre",
+    y = "Total Pendapatan"
+  ) +
+theme_minimal()
+
+summary(genre_income$total_income)
+```
+
+## Membuat format Dollar
+```{r}
+genre_income$total_income <- paste0(
+  "$",
+  format(round(genre_income$total_income, 2),
+         big.mark = ",")
+)
+```
+
+## Tabel Total Pendapatan
+```{r}
+datatable(
+  genre_income,
+  colnames = c("Genre Film", "Total Pendapatan"),
+  options = list(
+    pageLength = 10,
+    autoWidth = TRUE
+  ),
+  caption = "Tabel Pendapatan Berdasarkan Genre Film"
+)
+```
+
+## Interpretasi
+Berdasarkan visualisasi “Pendapatan Berdasarkan Genre Film”, terlihat bahwa genre Sports merupakan genre dengan total pendapatan tertinggi dibandingkan genre lainnya. Genre ini menghasilkan pendapatan sekitar 5314 dollar, lebih tinggi dibanding genre lain seperti Sci-Fi dan Animation. Sebaliknya, genre Music memiliki total pendapatan paling rendah di antara seluruh kategori film. Hal ini menunjukkan bahwa minat pelanggan terhadap genre Music relatif lebih kecil dibandingkan genre lainnya.
+Dari hasil statistik deskriptif juga diperoleh rata-rata total pendapatan genre sebesar 4213 dollar. Nilai rata-rata sebesar 4213 menunjukkan bahwa sebagian besar genre memiliki pendapatan yang cukup tinggi dan relatif merata, meskipun terdapat beberapa genre yang lebih dominan diminati. Dengan diperoleh hasil ini, perusahaan dapat meningkatkan startegi bisnis dengan penambahan stok film pada genre yang populer, strategi promosi berdasarkan genre, ataupun rekomendasi kepada pelanggan.
+
+
+# Insight 2: Pola Penyewaan Film Berdasarkan Hari
+Mengetahui pola penyewaan berdasarkan hari sangat penting untuk dapat memahami perilaku pelanggan. Analisis ini dilakukan untuk mengetahui pada hari apa aktivitas rental film paling tinggi dan paling rendah. Analisis ini diharapkan dapat membantu perusahaan mengetahui waktu dengan aktivitas rental tertinggi sehingga dapat menerapkan strategi bisnis dengan tepat.
+
+## Pengambilan Data
+```{r}
+rental_day <- dbGetQuery(con, "
+SELECT rental_date 
+FROM rental
+")
+
+rental_day$rental_date <- as.POSIXct(rental_day$rental_date)
+rental_day$day <- weekdays(rental_day$rental_date)
+
+#Mengurutkan hari
+rental_day$day <- factor(
+  rental_day$day,
+  levels = c(
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+  )
+)
+```
+
+## Menghitung jumlah rental per hari
+```{r}
+rental_summary <- as.data.frame(table(rental_day$day))
+colnames(rental_summary) <- c("day", "total_rental")
+```
+
+## Visualisasi
+```{r}
+ggplot(rental_summary,
+       aes(x = "", 
+           y = total_rental,
+           fill = day)) +
+  geom_col(color = "white", width = 1) +
+  geom_text(aes(label = total_rental),
+            position = position_stack(vjust = 0.5),
+            color = "black",
+            size = 4) +
+  coord_polar(theta = "y") +
+  labs(
+    title = "Jumlah Rental Berdasarkan Hari",
+    fill = "Hari"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 16
+    )
+  )
+```
+
+## Tabel Jumlah Rental Film berdasarkan Hari
+```{r}
+datatable(
+  rental_summary,
+  colnames = c("Hari", "Jumlah Rental"),
+  class = 'stripe hover cell-border',
+  options = list(
+    pageLength = 7,
+    autoWidth = TRUE
+  ),
+  caption = htmltools::tags$caption(
+    style = 'caption-side: top; text-align: center; color:black; font-size:20px;',
+    'Tabel Jumlah Rental Film berdasarkan Hari'
+  )
+)
+```
+
+## Perhitungan Mean Jumlah Rental
+
+Rata-rata jumlah rental per hari dihitung menggunakan rumus:
+
+$$
+\bar{x} = \frac{\sum x_i}{n}
+$$
+
+Keterangan:
+- \(\bar{x}\) = rata-rata jumlah rental
+- \(x_i\) = jumlah rental tiap hari
+- \(n\) = jumlah hari
+
+```{r}
+mean_rental <- mean(rental_summary$total_rental)
+
+mean_rental
+```
+
+## Interpretasi
+Berdasarkan hasil analisis, diketahui bahwa jumlah rental film tertinggi terjadi pada hari Tuesday (Selasa) dengan total sebanyak 2463 transaksi rental. Sebaliknya, jumlah rental terendah terjadi pada hari Thursday (Kamis) dengan total sebanyak 2200 transaksi rental. Hasil ini menunjukkan bahwa aktivitas rental film relatif stabil setiap hari karena selisih jumlah rental antar hari tidak terlalu besar. Hal ini juga didukung dengan hasil perhitungan nilai rata-rata rental sejumlah 2292 transaksi. Selain itu, jumlah rental pada akhir pekan seperti Saturday (Sabtu) dan Sunday (Minggu) juga cukup tinggi, yang menunjukkan bahwa pelanggan cenderung menyewa film untuk hiburan saat waktu luang.
+
+
+# Insight 3: Customer dengan Pengeluaran Tertinggi
+Dalam bisnis, pelanggan merupakan aset utama perusahaan. Tetapi, tidak semua pelanggan memberikan kontribusi pendapatan yang sama. Sebagian pelanggan dapat melakukan transaksi lebih sering dan menghasilkan pendapatan yang jauh lebih besar dibanding pelanggan lainnya. Oleh karena itu, analisis ini dilakukan untuk mengidentifikasi pelanggan paling bernilai (high-value customers) dalam bisnis rental film.
+
+## Pengambilan Data
+```{r}
+top_customer <- dbGetQuery(con, "
+SELECT CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+SUM(p.amount) AS total_spending
+FROM customer c
+JOIN payment p ON c.customer_id = p.customer_id
+GROUP BY customer_name
+ORDER BY total_spending DESC
+LIMIT 5
+")
+```
+
+## Visualisasi
+```{r}
+ggplot(top_customer,
+  aes(x=reorder(customer_name, total_spending),
+  y=total_spending,
+  fill=customer_name)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 5 Customer Berdasarkan Pengeluaran",
+    x = "Customer",
+    y = "Total Pengeluaran"
+  ) +
+theme_bw()
+```
+
+## Interpretasi
+Berdasarkan visualisasi di atas, kelima pelanggan tersebut merupakan pelanggan dengan pengeluaran terbesar dalam konsumsinya pada bisnis ini. Dengan informasi tersebut, perusahaan dapat memaksimalkan strategi bisnis untuk meningkatkan keuntungan dengan melibatkan kelima pelanggan tersebut.
+
+
+# Insight 4: Hubungan Durasi Film dan Harga Rental
+Penentuan harga rental penting karena berpengaruh langsung terhadap pendapatan perusahaan dan minat pelanggan. Salah satu faktor yang diduga memengaruhi harga rental itu sendiri adalah durasi film. Oleh karena itu, analisis hubungan antara durasi film dan harga rental dilakukan untuk mengetahui apakah durasi film benar-benar berpengaruh terhadap penentuan harga rental.
+
+## Pengambilan Data
+```{r}
+film_duration <- dbGetQuery(con, "
+SELECT title,length,rental_rate
+FROM film
+")
+```
+
+## Visualisasi
+```{r}
+ggplot(film_duration,
+  aes(x=length, y=rental_rate)) +
+  geom_point(color="blue") +
+  geom_smooth(method="lm", se=FALSE, color="red") +
+  labs(
+    title = "Hubungan Durasi Film dan Harga Rental",
+    x = "Durasi Film",
+    y = "Rental Rate"
+  ) +
+theme_minimal()
+```
+
+## Analisis Korelasi
+Koefisien korelasi Pearson dihitung menggunakan rumus:
+
+$$
+r = \frac{
+\sum (x_i - \bar{x})(y_i - \bar{y})
+}{
+\sqrt{
+\sum (x_i - \bar{x})^2
+\sum (y_i - \bar{y})^2
+}
+}
+$$
+Keterangan:
+- \(r\) = koefisien korelasi Pearson
+
+- \(x_i\) = durasi film
+
+- \(y_i\) = rental rate
+
+- \(\bar{x}\) = rata-rata durasi film
+
+- \(\bar{y}\) = rata-rata rental rate
+
+```{r}
+cor(film_duration$length,
+    film_duration$rental_rate)
+```
+
+## Interpretasi
+Berdasarkan scatterplot, terlihat bahwa data tersebar pada tiga tingkat harga rental, yaitu sekitar 1, 3, dan 5. Garis regresi yang sedikit menanjak menunjukkan bahwa semakin panjang durasi film, maka rental rate cenderung meningkat. Hal ini menunjukkan bahwa film dengan durasi lebih panjang cenderung memiliki harga rental yang sedikit lebih tinggi dibandingkan film berdurasi pendek. 
+
+Hasil analisis scatterplot juga diperkuat dengan nilai korelasi senilai:
+$$
+r = 0.02978926
+$$
+
+Nilai korelasi tersebut mendekati 0, yang berarti hubungan antara durasi film dan harga rental sangat lemah. Meskipun arah hubungan bersifat positif, artinya semakin panjang durasi film maka harga rental cenderung sedikit meningkat, tetapi pengaruhnya hampir tidak signifikan. Dengan kata lain, durasi film bukan merupakan faktor utama yang menentukan harga rental pada database Sakila ini.
+
+
+# Insight 5: Aktor dengan Jumlah Film Terbanyak
+Pemeran (aktor) merupakan salah satu faktor penting yang dapat mempengaruhi minat penonton terhadap suatu film. Aktor yang sering muncul dalam banyak film biasanya memiliki popularitas yang tinggi dalam industri film tersebut. Melalui analisis ini, jumlah film yang diperankan oleh setiap aktor dapat digunakan untuk mengetahui aktor yang paling aktif atau dominan dalam koleksi film perusahaan rental. Analisis ini diharapkan mampu membantu perusahaan untuk memahami aktor yang paling sering muncul beserta potensi daya tarik pelanggan terhadap aktor tertentu, atau membantu perusahaan dalam mengelola katalog film berdasarkan popularitas aktor itu sendiri.
+
+## Pengambilan Data
+```{r}
+top_actor <- dbGetQuery(con, "
+SELECT CONCAT(a.first_name, ' ', a.last_name) AS actor_name,
+COUNT(fa.film_id) AS total_film
+FROM actor a
+JOIN film_actor fa
+ON a.actor_id = fa.actor_id
+GROUP BY actor_name
+ORDER BY total_film DESC
+LIMIT 5
+")
+```
+
+## Visualisasi
+```{r}
+ggplot(top_actor,
+  aes(x=reorder(actor_name, total_film),
+  y=total_film,
+  fill=actor_name)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 5 Aktor dengan Jumlah Film Terbanyak",
+    x = "Aktor",
+    y = "Jumlah Film"
+  ) +
+theme_void()
+
+```
+
+## Menampilkan Tabel
+```{r}
+datatable(
+  top_actor,
+  colnames = c("Nama Aktor", "Jumlah Film"),
+  class = 'stripe hover cell-border',
+  options = list(
+    pageLength = 7,
+    autoWidth = TRUE
+  ),
+  caption = htmltools::tags$caption(
+    style = 'caption-side: top; text-align: center; color:black; font-size:20px;',
+    'Tabel Jumlah Rental Film berdasarkan Hari'
+  )
+)
+```
+## Interpretasi
+Berdasarkan visualisasi, terlihat bahwa Susan Davis merupakan aktor dengan jumlah film terbanyak dalam database Sakila. Selain Susan Davis, aktor seperti Gina Degeneres, Walter Torn, Mary Keitel, dan Matthew Carrey juga memiliki jumlah keterlibatan film yang cukup tinggi. Namun, selisih jumlah film antar aktor tidak terlalu jauh. Visualisasi ini menunjukkan bahwa beberapa aktor memiliki kontribusi lebih dominan dalam koleksi film perusahaan rental. Aktor dengan jumlah film tinggi berpotensi menjadi daya tarik utama bagi pelanggan dalam memilih film.
+
+# Kesimpulan
+Berdasarkan analisis yang telah dilakukan, database Sakila dapat digunakan untuk memperoleh berbagai insight bisnis terkait aktivitas rental film, perilaku pelanggan, dan karakteristik film. Hasil analisis ini dapat lebih diperdalam lagi demi membantu perusahaan dalam mendukung pengambilan keputusan berbasis data dengan tepat untuk meningkatkan profit perusahaan.
